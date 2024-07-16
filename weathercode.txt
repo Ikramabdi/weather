@@ -1,0 +1,151 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <DHT.h>
+#include <BlynkSimpleEsp32.h>
+
+// Define the pins for the DHT sensor, rain sensor, LDR sensor, LEDs, buzzer, and the I2C interface for the LCD
+#define DHTPIN 15
+#define DHTTYPE DHT22
+#define RAIN_PIN 32
+#define LDR_PIN 34
+#define LCD_ADDRESS 0x27 // Change this address if needed
+
+#define YELLOW_LED_PIN 2
+#define RED_LED_PIN 4
+#define BUZZER_PIN 5
+
+// Initialize the LCD with the I2C address
+LiquidCrystal_I2C lcd(LCD_ADDRESS, 16, 2); // 16x2 LCD
+
+// Initialize DHT sensor
+DHT dht(DHTPIN, DHTTYPE);
+
+// Blynk authentication token and WiFi credentials
+char auth[] = "zAq4IhUeajWem-SUkUBU7s9GZuDVOepy";
+char ssid[] = "SETSOM";
+char pass[] = "614444243";
+
+// Variables for timing and display mode
+unsigned long previousMillis = 0;
+const long interval = 2000; // Interval for rotating the display (2 seconds)
+int displayMode = 0; // Variable to track display mode
+
+// LDR threshold for day/night detection
+const int LDR_THRESHOLD = 2000; // Adjust this value as needed
+
+void setup() {
+  Serial.begin(9600);
+  Serial.println("Initializing...");
+
+  // Initialize the LCD
+  lcd.init();
+  lcd.backlight();
+
+  // Initialize DHT sensor
+  dht.begin();
+
+  // Connect to WiFi
+  Blynk.begin(auth, ssid, pass);
+
+  // Set the rain and LDR analog pins
+  pinMode(RAIN_PIN, INPUT);
+  pinMode(LDR_PIN, INPUT);
+
+  // Set LED and buzzer pins as outputs
+  pinMode(YELLOW_LED_PIN, OUTPUT);
+  pinMode(RED_LED_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  // Turn on the yellow LED
+  digitalWrite(YELLOW_LED_PIN, HIGH);
+}
+
+void loop() {
+  // Read temperature and humidity from DHT sensor
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  // Check if any reads failed and exit early (to try again)
+  if (isnan(temperature) || isnan(humidity)) {
+    Serial.println("Failed to read from DHT sensor!");
+    return;
+  }
+
+  // Read rain sensor data
+  int rainAnalog = analogRead(RAIN_PIN);
+
+  // Reverse the mapping: dry is 0, wet is up to 100
+  int rainIntensity = map(rainAnalog, 4095, 0, 0, 100);
+
+  // Ensure rain intensity is within bounds
+  rainIntensity = constrain(rainIntensity, 0, 100);
+
+  // Read LDR sensor data
+  int ldrValue = analogRead(LDR_PIN);
+  String dayNight = (ldrValue > LDR_THRESHOLD) ? "Night" : "Day";
+
+  // Print sensor values to the serial monitor
+  Serial.print("Temperature: ");
+  Serial.print(temperature);
+  Serial.println(" °C");
+  Serial.print("Humidity: ");
+  Serial.print(humidity);
+  Serial.println(" %");
+  Serial.print("Rain Intensity: ");
+  Serial.println(rainIntensity);
+  Serial.print("LDR Value: ");
+  Serial.println(ldrValue);
+  Serial.println(dayNight);
+
+  // Send sensor data to Blynk
+  Blynk.virtualWrite(V0, temperature);
+  Blynk.virtualWrite(V1, humidity);
+  Blynk.virtualWrite(V2, rainIntensity);
+  Blynk.virtualWrite(V3, ldrValue);
+  Blynk.virtualWrite(V4, dayNight);
+
+  // Turn on the red LED and buzzer if temperature is greater than 35°C
+  if (temperature > 35) {
+    digitalWrite(RED_LED_PIN, HIGH);
+    digitalWrite(BUZZER_PIN, HIGH);
+  } else {
+    digitalWrite(RED_LED_PIN, LOW);
+    digitalWrite(BUZZER_PIN, LOW);
+  }
+
+  // Get the current time
+  unsigned long currentMillis = millis();
+
+  // Check if it's time to update the display
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+
+    // Rotate the display mode
+    displayMode = (displayMode + 1) % 2;
+
+    // Clear the LCD
+    lcd.clear();
+
+    // Display the appropriate information based on the display mode
+    if (displayMode == 0) {
+      lcd.setCursor(0, 0);
+      lcd.print("Temp: ");
+      lcd.print(temperature);
+      lcd.print(" C");
+      lcd.setCursor(0, 1);
+      lcd.print("Humidity: ");
+      lcd.print(humidity);
+      lcd.print(" %");
+    } else {
+      lcd.setCursor(0, 0);
+      lcd.print("Rain: ");
+      lcd.print(rainIntensity);
+      lcd.setCursor(0, 1);
+      lcd.print("LDR: ");
+      lcd.print(dayNight);
+    }
+  }
+
+  // Run Blynk
+  Blynk.run();
+}
